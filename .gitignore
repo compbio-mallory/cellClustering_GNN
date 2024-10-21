@@ -2,13 +2,20 @@
 /data_old
 /CRC2_hg19
 /CRC2_hg19_old
-/simalation_06242024
+/simulation_06242024
 /T10_hg38
 /T16_hg19
 /test_data
+/__pycache__
 
 # Ignore Jupyter Notebook checkpoints
 *.ipynb
 
 # Ignore Mac OS X system files
 .DS_Store
+
+# Ignore plot.py
+plot.py
+
+# Ignore other training files
+train_*.py

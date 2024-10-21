@@ -132,7 +132,8 @@ def main(argv):
     FLAGS.SNV_path = os.path.join(FLAGS.data_path, 'input_genotype.tsv')
     FLAGS.labels_path = os.path.join(FLAGS.data_path, 'cells_groups.tsv')
     
-  true_labels, _ = metrics.truth_values(FLAGS.labels_path)
+  if FLAGS.labels_path is not None:
+    true_labels, _ = metrics.truth_values(FLAGS.labels_path)
 
   # Load CNA cosine similarity matrix as feature matrix
   CNA_cosine = load_adjacency_matrix(FLAGS.CNA_path)
@@ -185,7 +186,8 @@ def main(argv):
             gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features_pooled)
             assignments = gmm.predict(features_pooled)
             print("clusters: ", assignments)
-            print("v_measure: ", metrics.v_measure(true_labels, assignments))
+            if FLAGS.labels_path is not None:
+              print("v_measure: ", metrics.v_measure(true_labels, assignments))
 
 
           
@@ -214,7 +216,8 @@ def main(argv):
   print("clusters: ", assignments)
   predicted_clusters = assignments
   # Calculate V-measure for the new predicted clusters
-  print(f"V-measure for gmm clustering: ", metrics.v_measure(true_labels, predicted_clusters))
+  if FLAGS.labels_path is not None:
+    print(f"V-measure for gmm clustering: ", metrics.v_measure(true_labels, predicted_clusters))
 
   # print missclassified nodes
   # pred_unique_labels = pd.factorize(predicted_clusters)[0]

@@ -2,6 +2,8 @@ import numpy as np
 import scipy.sparse
 from scipy.sparse import base
 from scipy import sparse
+import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
 
 def load_adjacency_matrix(fname):
     """
@@ -42,3 +44,17 @@ def load_tsv(fname, verbose=True):
         )
 
     return sparse_features
+  
+def get_cna_cosine_similarity(fname):
+  df = pd.read_csv(fname, sep = "\t")
+  df.dropna(axis=1, how='all', inplace = True)
+  reads = df.drop(['CHROM', 'START', "END"], axis = 1)
+  reads = reads.to_numpy()
+  similarity_matrix = cosine_similarity(reads.T)
+
+  min_vals = similarity_matrix.min(axis=0)
+  max_vals = similarity_matrix.max(axis=0)
+
+  scaled_sim = (similarity_matrix - min_vals) / (max_vals - min_vals)
+  dist = 1 - scaled_sim
+  return dist

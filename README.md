@@ -12,11 +12,17 @@ The main components are:
 
 ### Prerequisites
 Python 3.7 or higher
+
 TensorFlow 2.x
+
 NumPy
+
 SciPy
+
 scikit-learn
+
 pandas
+
 absl-py
 
 ### Steps
@@ -66,8 +72,9 @@ Your data should be organized as follows:
 
 1. Data Directory (data/ by default):
 2. CNA Cosine Similarity Matrix (cell_adj_cosine.tsv): A TSV file representing the cosine similarity between cells based on CNA data.
-3. SNV Data (input_genotype.tsv): A TSV file containing SNV data for each cell.
-4. Labels (cells_groups.tsv): A TSV file with true cluster labels for evaluation.
+3. Use get_cna_cosine_similarity() function from data.py to get the CNA cosine similarity matrix(please modify the function to remove unwanted coulumns from the data)
+4. SNV Data (input_genotype.tsv): A TSV file containing SNV data for each cell.
+5. Labels (cells_groups.tsv): A TSV file with true cluster labels for evaluation.
 
 ## Citation
 
