@@ -26,12 +26,12 @@ pandas
 absl-py
 
 ### Steps
-
-1. git clone https://github.com/compbio-mallory/cellClustering_GNN.git
-2. conda create -n <env-name> python=3.7
-3. source activate <env-name>
-4. pip install -r requirements.txt
-
+```sh
+$ git clone https://github.com/compbio-mallory/cellClustering_GNN.git
+$ conda create -n <env-name> python=3.7
+$ source activate <env-name>
+$ pip install -r requirements.txt
+```
 ## Usage
 
 --CNA_path: Path to the CNA cosine similarity data file.
@@ -55,8 +55,8 @@ absl-py
 --collapse_regularization: Regularization parameter for the clustering layer.
 
 ### Example Command
-
-python train.py \
+```sh
+$ python train.py \
   --CNA_path data/CNA_cosine.tsv \
   --SNV_path data/SNVs.tsv
   --architecture 16 \
@@ -65,7 +65,7 @@ python train.py \
   --learning_rates 0.001 \
   --dropout_rate 0.5 \
   --collapse_regularization 1
-
+```
 ## Data Preperation 
 
 Your data should be organized as follows:
