@@ -1,3 +1,4 @@
+# Ignore data files 
 /data
 /CRC2_hg19
 /CRC2_hg19_old
@@ -5,4 +6,9 @@
 /T10_hg38
 /T16_hg19
 /test_data
-cell_adj_cosine.ipynb
+
+# Ignore Jupyter Notebook checkpoints
+*.ipynb
+
+# Ignore Mac OS X system files
+.DS_Store
