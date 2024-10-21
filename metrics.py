@@ -7,49 +7,27 @@ from sklearn.metrics import cluster
 from sklearn import metrics
 import pandas as pd
 
+import pandas as pd
+import numpy as np
+
 def truth_values(file):
-  # check if file path contains rep1/ground_truth.tsv
-  if "rep1" in file or "rep4" in file:
-    data = pd.read_csv(file, sep="\t")
-    mapping = {
-        2: 0,
-        4: 3,
-        5: 2,
-        6: 1
-    }
-    true_labels = data['group'].map(mapping).to_numpy()
-  elif "rep2" in file or "rep3" in file:
-    data = pd.read_csv(file, sep="\t")
-    mapping = {
-        1: 2,
-        4: 3,
-        5: 0,
-        6: 1
-    }
-    true_labels = data['group'].map(mapping).to_numpy()
-  elif 'rep5' in file:
-    data = pd.read_csv(file, sep="\t")
-    mapping = {
-        3: 0,
-        4: 2,
-        5: 3,
-        6: 1
-    }
-    true_labels = data['group'].map(mapping).to_numpy()
-  else:
-    cell_id = pd.read_csv(file, sep = "\t", header = None, names = ['id', 'cell'])
-    cell_groups = pd.read_csv("data/T10_groups.tsv", sep = "\t")
-    cells = cell_id.merge(cell_groups)
-    mapping = {
-        'D': 0,
-        'H': 1,
-        'A1': 2,
-        'A2': 3
-    }
-    cells['label'] = cells['groups'].map(mapping)
-    true_labels = cells['label'].to_numpy()
-  return true_labels
-  # Correcting the DataFrame variable name
+    if 'cell_idx' in file:
+        cell_id = pd.read_csv(file, sep="\t", header=None, names=['id', 'cell'])
+        cell_groups = pd.read_csv("data/T10_groups.tsv", sep="\t")
+        cells = cell_id.merge(cell_groups, left_on='cell', right_on='cell')
+        mapping = {
+            'D': 0,
+            'H': 1,
+            'A1': 2,
+            'A2': 3
+        }
+        cells['label'] = cells['groups'].map(mapping)
+        true_labels = cells['label'].to_numpy()
+        unique_labels = np.unique(true_labels)
+    else:
+        data = pd.read_csv(file, sep="\t")
+        true_labels, unique_labels = pd.factorize(data['group'])
+    return true_labels, unique_labels
 
 def pairwise_precision(y_true, y_pred):
   """Computes pairwise precision of two clusterings.

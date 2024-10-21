@@ -56,7 +56,7 @@ class GATConv(layers.Layer):
         
         # Applying Adjacency Weights to attention scores
         attention_scores_weighted = attention_scores * adjacency
-        
+        attention_scores_weighted = tf.sparse.reorder(attention_scores_weighted)
         # Convert SparseTensor to Tensor
         dense_attention_scores_weighted = tf.sparse.to_dense(attention_scores_weighted)
 

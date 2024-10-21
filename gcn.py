@@ -4,7 +4,7 @@
 Modifications include the skip-connection and changing the nonlinearity to SeLU.
 """
 from typing import Tuple
-import tensorflow.compat.v2 as tf
+import tensorflow as tf
 #from gat_conv import GATConv
 
 class GCN(tf.keras.layers.Layer):
@@ -37,11 +37,11 @@ class GCN(tf.keras.layers.Layer):
   def build(self, input_shape):
     """Builds the Keras model according to the input shape."""
     self.n_features = input_shape[0][-1]
-    self.kernel = self.add_variable(
+    self.kernel = self.add_weight(
         'kernel', shape=(self.n_features, self.n_channels))
-    self.bias = self.add_variable('bias', shape=(self.n_channels,))
+    self.bias = self.add_weight('bias', shape=(self.n_channels,))
     if self.skip_connection:
-      self.skip_weight = self.add_variable(
+      self.skip_weight = self.add_weight(
           'skip_weight', shape=(self.n_channels,))
     else:
       self.skip_weight = 0
