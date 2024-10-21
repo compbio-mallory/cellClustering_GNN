@@ -26,17 +26,13 @@ import pandas as pd
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    'graph_path',
+    'CNA_path',
     None,
-    'Input graph path.')
+    'Input CNA cosine similarity data path.')
 flags.DEFINE_string(
-    'adj_path',
+    'SNV_path',
     None,
-    'Input adjacency path.')
-flags.DEFINE_string(
-    'features_path',
-    None,
-    'Input features path.')
+    'Input SNV data path.')
 flags.DEFINE_list(
     'architecture',
     [16],
@@ -132,27 +128,31 @@ def main(argv):
   # Load and process the data (convert node features to dense, normalize the
   # graph, convert it to Tensorflow sparse tensor.
   if FLAGS.data_path is not None:
-    FLAGS.adj_path = os.path.join(FLAGS.data_path, 'cell_adj_cosine.tsv')
-    FLAGS.features_path = os.path.join(FLAGS.data_path, 'input_genotype.tsv')
+    FLAGS.CNA_path = os.path.join(FLAGS.data_path, 'cell_adj_cosine.tsv')
+    FLAGS.SNV_path = os.path.join(FLAGS.data_path, 'input_genotype.tsv')
     FLAGS.labels_path = os.path.join(FLAGS.data_path, 'cells_groups.tsv')
+    
+  true_labels, _ = metrics.truth_values(FLAGS.labels_path)
 
-  adjacency = load_adjacency_matrix(FLAGS.adj_path)
-  adjacency = adjacency.todense()
-  #print(adjacency_bin)
-  features = load_tsv(FLAGS.features_path)
-  features = features.T
-  # features_adj = get_affinity(features, 7)
+  # Load CNA cosine similarity matrix as feature matrix
+  CNA_cosine = load_adjacency_matrix(FLAGS.CNA_path)
+  CNA_cosine = CNA_cosine.todense()
+  
+  # Load SNV data
+  SNV_data = load_tsv(FLAGS.SNV_path)
+
   from sklearn.metrics.pairwise import cosine_similarity
-  features_adj = cosine_similarity(features)
-  features_adj = sparse.csr_matrix(features_adj)
+  SNV_adj = cosine_similarity(SNV_data)
+  # SNV_adj = utils.construct_knn_graph(features, k=7)
+  SNV_adj = sparse.csr_matrix(SNV_adj)
 
-  n_nodes = adjacency.shape[0]
-  feature_size = adjacency.shape[1]
+  n_nodes = CNA_cosine.shape[0]
+  feature_size = CNA_cosine.shape[1]
 
-  # Create graph from features_adj
-  graph = convert_scipy_sparse_to_sparse_tensor(features_adj)
+  # Create graph from SNV_adj
+  graph = convert_scipy_sparse_to_sparse_tensor(SNV_adj)
   graph_normalized = convert_scipy_sparse_to_sparse_tensor(
-      utils.normalize_graph(features_adj.copy()))
+      utils.normalize_graph(SNV_adj.copy()))
 
   # Create model input placeholders of appropriate size
   input_features = tf.keras.layers.Input(shape=(feature_size,))
@@ -160,7 +160,7 @@ def main(argv):
   input_adjacency = tf.keras.layers.Input((n_nodes,), sparse=True)
 
   model = build_dmon(input_features, input_graph, input_adjacency)
-
+  
   # Computes the gradients wrt. the sum of losses, returns a list of them.
   def grad(model, inputs):
     with tf.GradientTape() as tape:
@@ -173,30 +173,31 @@ def main(argv):
       #optimizer = tf.keras.optimizers.Adam(lr)
       model.compile(optimizer, None)
       for epoch in range(FLAGS.n_epochs):
-          loss_values, grads = grad(model, [adjacency, graph_normalized, graph])
+          loss_values, grads = grad(model, [CNA_cosine, graph_normalized, graph])
           optimizer.apply_gradients(zip(grads, model.trainable_variables)) # back propagation
           if epoch % 100 == 0:
             print(f'epoch {epoch}, losses: ' +
                   ' '.join([f'{loss_value.numpy():.4f}' for loss_value in loss_values]))
             # Obtain the cluster assignments.
-            features_pooled, assignments = model([adjacency, graph_normalized, graph], training=False)
+            features_pooled, assignments = model([CNA_cosine, graph_normalized, graph], training=False)
             # perform the gmm clustering on the pooled features
             from sklearn.mixture import GaussianMixture
             gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features_pooled)
             assignments = gmm.predict(features_pooled)
             print("clusters: ", assignments)
+            print("v_measure: ", metrics.v_measure(true_labels, assignments))
 
 
           
   # Obtain the cluster assignments.
-  features, assignments = model([adjacency, graph_normalized, graph], training=False)
+  features, assignments = model([CNA_cosine, graph_normalized, graph], training=False)
   assignments = assignments.numpy()
   clusters = assignments.argmax(axis=1)  # Convert soft to hard clusters.
   clusters_str = ', '.join(map(str, clusters))  # Convert elements to string and join with comma.
   print("clusters: ", clusters_str)
   # Prints some metrics used in the paper.
-  print('Conductance:', metrics.conductance(adjacency, clusters))
-  print('Modularity:', metrics.modularity(adjacency, clusters))
+  print('Conductance:', metrics.conductance(CNA_cosine, clusters))
+  print('Modularity:', metrics.modularity(CNA_cosine, clusters))
 
   # Print number of nodes in each cluster
   for i in range(FLAGS.n_clusters):
@@ -205,10 +206,8 @@ def main(argv):
   predicted_clusters = np.array(clusters)
 
 
-  true_labels = metrics.truth_values(FLAGS.labels_path)
-
-  print(f"V-measure: ", metrics.v_measure(true_labels, predicted_clusters))
-
+  
+  # print(f"V-measure: ", metrics.v_measure(true_labels, predicted_clusters))
   # perform the gmm clustering on the features
   gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features)
   assignments = gmm.predict(features)
@@ -218,6 +217,10 @@ def main(argv):
   print(f"V-measure for gmm clustering: ", metrics.v_measure(true_labels, predicted_clusters))
 
   # print missclassified nodes
-  print("Missclassified nodes: ", np.where(true_labels != predicted_clusters))
+  # pred_unique_labels = pd.factorize(predicted_clusters)[0]
+  # print("unique labels: ", pred_unique_labels)
+  # missclassified = np.where(true_labels != pred_unique_labels)
+  # print("Missclassified nodes: ", missclassified)
+
 if __name__ == '__main__':
   app.run(main)
