@@ -1,6 +1,6 @@
-numpy>=1.14.0
-scipy>=1.0.0
-tensorflow>=2.0.0
-scikit-learn 
-pandas 
-absl-py
+numpy==1.26.4
+scipy==1.12.0
+tensorflow>=2.15.0
+scikit-learn==1.4.0
+pandas==2.2.0
+absl-py==2.1.0

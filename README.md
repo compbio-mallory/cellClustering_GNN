@@ -28,7 +28,7 @@ absl-py
 ### Steps
 ```sh
 $ git clone https://github.com/compbio-mallory/cellClustering_GNN.git
-$ conda create -n <env-name> python=3.7
+$ conda create -n <env-name> python=3.11
 $ conda activate <env-name>
 $ pip install -r requirements.txt
 ```
@@ -95,7 +95,9 @@ Usage: The Deep Modularity Networks (DMoN) clustering approach is based on the m
 
 ### ADEPT: Autoencoder with Differentially Expressed Genes and Imputation for a Robust Spatial Transcriptomics Clustering
 ```
-Y. Hu, Y. Zhao, C. T. Schunk, Y. Ma, T. Derr, X. M. Zhou. ADEPT: autoencoder with   differentially expressed genes and imputation for robust spatial transcriptomics clustering.  iScience (2023) 26(6), 106792. (also accepted and presented at RECOMB-Seq, Istanbul, Turkey, April 14-15, 2023)
+Y. Hu, Y. Zhao, C. T. Schunk, Y. Ma, T. Derr, X. M. Zhou. ADEPT: autoencoder with
+differentially expressed genes and imputation for robust spatial transcriptomics clustering
+iScience (2023) 26(6), 106792. (also accepted and presented at RECOMB-Seq, Istanbul, Turkey, April 14-15, 2023)
 ```
 
 Usage: The implementation of the Graph Attention Convolutional Network Autoencoder (GATCN_AE) is adapted from this work. It provided the foundational architecture for our autoencoder module.

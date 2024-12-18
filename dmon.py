@@ -6,8 +6,8 @@ DMoN optimizes modularity clustering objective in a fully unsupervised regime.
 """
 from typing import List
 from typing import Tuple
-import tensorflow.compat.v2 as tf
-
+# import tensorflow.compat.v2 as tf
+import tensorflow as tf
 
 class DMoN(tf.keras.layers.Layer):
   """Implementation of Deep Modularity Network (DMoN) layer.

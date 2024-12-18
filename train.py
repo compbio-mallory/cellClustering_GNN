@@ -7,7 +7,7 @@ from scipy.sparse import base
 import tensorflow as tf
 from scipy import sparse
 import random
-
+import time
 import utils, dmon, metrics
 
 import os
@@ -135,6 +135,7 @@ def main(argv):
   if FLAGS.labels_path is not None:
     true_labels, _ = metrics.truth_values(FLAGS.labels_path)
 
+  start = time.time()
   # Load CNA cosine similarity matrix as feature matrix
   CNA_cosine = load_adjacency_matrix(FLAGS.CNA_path)
   CNA_cosine = CNA_cosine.todense()
@@ -218,7 +219,9 @@ def main(argv):
   # Calculate V-measure for the new predicted clusters
   if FLAGS.labels_path is not None:
     print(f"V-measure for gmm clustering: ", metrics.v_measure(true_labels, predicted_clusters))
-
+  end = time.time()
+  
+  print(f"Time taken: {end - start} seconds")
   # print missclassified nodes
   # pred_unique_labels = pd.factorize(predicted_clusters)[0]
   # print("unique labels: ", pred_unique_labels)
