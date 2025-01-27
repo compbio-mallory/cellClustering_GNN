@@ -16,8 +16,10 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 from tqdm import tqdm
 import os
-# os.environ['TF_DETERMINISTIC_OPS'] = '1'
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+"""
+relax fixed seeds
+"""
 # Set the random seed for TensorFlow operations
 seed = random.randint(1,100)
 # seed = 42
