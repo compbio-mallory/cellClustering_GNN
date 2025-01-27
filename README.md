@@ -76,6 +76,13 @@ Your data should be organized as follows:
 4. SNV Data (input_genotype.tsv): A TSV file containing SNV data for each cell.
 5. Labels (cells_groups.tsv): A TSV file with true cluster labels for evaluation.
 
+## Data Simulation
+
+Simulation data can be generated using the following commands:
+```
+bash simulation/run.log
+```
+
 ## Citation
 
 

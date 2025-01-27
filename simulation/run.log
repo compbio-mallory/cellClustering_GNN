@@ -1,0 +1,96 @@
+#src_sim="/gpfs/research/fangroup/lz20w/bulk_cna_exps/SC_bulk_sim/simulation.py"
+#src_tree="/gpfs/research/fangroup/lz20w/bulk_cna_exps/SC_bulk_sim/gen_tree.py"
+
+src_sim="/gpfs/research/fangroup/lz20w/sc_clustering_exps/SC_clustering/simulation/simulation.py"
+src_tree="/gpfs/research/fangroup/lz20w/sc_clustering_exps/SC_clustering/simulation/gen_tree.py"
+normal="/gpfs/research/fangroup/lz20w/sc_clustering_exps/SC_clustering/simulation/normal.tsv"
+# make tree structure for different number of structure, folders in clone*
+# default 4 clones
+for i in 2 4 6; do mkdir clone_${i}; done
+for i in 2 4 6; do for j in `seq 1 5`; do mkdir clone_${i}/rep$j; done; done
+for i in 2 4 6; do for j in `seq 1 5`; do python $src_tree -F $i -B 0.3 -o clone_${i}/rep$j/tree.tsv; done; done
+
+# make data for all different number of leaves, folders in t*
+for i in 2 4 6; do 
+  for j in `seq 1 5`; do 
+    python $src_sim --wd clone_${i}/rep${j} --tree clone_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp 0.05 --fn 0.5 --miss 0.85 --cells 500 --snvs 20000 --cnas 100 --normF $normal
+  done; 
+done
+
+# varied number of cells
+for i in 100 1000;
+do  
+mkdir cell_${i}
+  for j in `seq 1 5`; do 
+  mkdir cell_${i}/rep${j};
+  cp clone_4/rep${j}/tree.tsv cell_${i}/rep${j}
+  python $src_sim --wd cell_${i}/rep${j} --tree cell_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp 0.05 --fn 0.5 --miss 0.85 --cells ${i} --snvs 20000 --cnas 100 --normF $normal
+  done
+done
+
+# varied number of snvs
+for i in 10000 50000;
+do
+mkdir snv_${i}
+  for j in `seq 1 5`; do 
+  mkdir snv_${i}/rep${j}
+  cp clone_4/rep${j}/tree.tsv snv_${i}/rep${j}
+  python $src_sim --wd snv_${i}/rep${j} --tree snv_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp 0.05 --fn 0.5 --miss 0.85 --cells 500 --snvs ${i} --cnas 100 --normF $normal
+  done
+done
+
+# varied number of cnas
+for i in 50 200;
+do
+mkdir cna_${i}
+
+  for j in `seq 1 5`; do 
+  mkdir cna_${i}/rep${j}
+  cp clone_4/rep${j}/tree.tsv cna_${i}/rep${j}
+  python $src_sim --wd cna_${i}/rep${j} --tree cna_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp 0.05 --fn 0.5 --miss 0.85 --cells 500 --snvs 20000 --cnas ${i} --normF $normal
+  done
+done
+
+# varied fp
+for i in 0.01 0.1;
+do
+mkdir fp_${i}
+  for j in `seq 1 5`; do 
+  mkdir fp_${i}/rep${j}
+  cp clone_4/rep${j}/tree.tsv fp_${i}/rep${j}
+  python $src_sim --wd fp_${i}/rep${j} --tree fp_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp ${i} --fn 0.5 --miss 0.85 --cells 500 --snvs 20000 --cnas 100 --normF $normal
+  done
+done
+
+# varied fn
+for i in 0.55 0.6;
+do
+mkdir fn_${i}
+  for j in `seq 1 5`; do 
+  mkdir fn_${i}/rep${j}
+  cp clone_4/rep${j}/tree.tsv fn_${i}/rep${j}
+  python $src_sim --wd fn_${i}/rep${j} --tree fn_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp 0.05 --fn ${i} --miss 0.85 --cells 500 --snvs 20000 --cnas 100 --normF $normal
+  done
+done
+
+# varied miss
+for i in 0.8 0.9;
+do
+mkdir miss_${i}
+  for j in `seq 1 5`; do 
+  mkdir miss_${i}/rep${j}
+  cp clone_4/rep${j}/tree.tsv miss_${i}/rep${j}
+  python $src_sim --wd miss_${i}/rep${j} --tree miss_${i}/rep${j}/tree.tsv --sd 0.5 --eta 0 --fp 0.05 --fn 0.5 --miss ${i} --cells 500 --snvs 20000 --cnas 100 --normF $normal
+  done
+done
+
+#varied sd
+for i in 0.3 1;
+do
+mkdir sd_${i}
+  for j in `seq 1 5`; do 
+  mkdir sd_${i}/rep${j}
+  cp clone_4/rep${j}/tree.tsv sd_${i}/rep${j}
+  python $src_sim --wd sd_${i}/rep${j} --tree sd_${i}/rep${j}/tree.tsv --sd ${i} --eta 0 --fp 0.05 --fn 0.5 --miss 0.85 --cells 500 --snvs 20000 --cnas 100 --normF $normal
+  done
+done
