@@ -191,7 +191,17 @@ def main(argv):
     SNV_data = SNV_data.T
     
   # Impute the SNV data
-  SNV_data = impute_data(SNV_data)
+  """for snv dotproduct test setting only"""
+  # SNV_data = impute_data(SNV_data)
+
+  # SNV_adj = cosine_similarity(SNV_data)
+
+  # Replace "3" with "0"
+  SNV_data[SNV_data == 3] = 0
+
+  # Calculate dot product
+  SNV_adj = np.dot(SNV_data, SNV_data.T)
+  """for snv dotproduct test setting only"""
 
   SNV_adj = cosine_similarity(SNV_data)
   
