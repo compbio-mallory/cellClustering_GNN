@@ -235,7 +235,7 @@ def main(argv):
   # adjacency.data[:] = 0.001
   # print(adjacency)
   """for snv =0 setting only"""
-  features = CNA_cosine.numpy()
+  features = tf.convert_to_tensor(CNA_cosine, dtype=tf.float32)
 
   # print(adjacency)
   # Create graph from SNV_adj
