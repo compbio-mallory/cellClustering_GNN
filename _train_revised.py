@@ -6,7 +6,8 @@ import tensorflow as tf
 import scipy.sparse as sp
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import silhouette_score
-
+import matplotlib.pyplot as plt
+import umap
 import utils, dmon, metrics
 from data import load_tsv, load_adjacency_matrix
 from GATCN_AE import GATCN_AE, GAT_AE, GCN_AE
@@ -80,38 +81,32 @@ def build_dmon(input_features, input_graph, input_adj, model_type, feature_size,
         )([output, input_adj, input_features, output_ae])
 
     return tf.keras.Model(inputs=[input_features, input_graph, input_adj],
-                          outputs=[pool, pool_assignment])
+                          outputs=[pool, emb, pool_assignment])
 
 # ---------------- TRAIN LOOP ----------------
 def train(model, features, graph_norm, graph, true_labels=None, 
-          use_clip=True, clip_norm=5.0, clip_value=0.5, clip_type="norm"):
+          use_clip=True, clip_norm=5.0, clip_value=0.5, clip_type="norm",
+          save_path="/maiziezhou_lab/yunfei/Projects/cellClustering_GNN/results_for_plotting/latents_T10", plot_umap=True):
     """
-    Train the model with optional gradient clipping.
+    Train the model while tracking AE latent embeddings.
     
-    Args:
-        model: tf.keras.Model
-        features: input features
-        graph_norm: normalized adjacency or graph input
-        graph: adjacency or graph input
-        true_labels: optional ground truth labels for metrics
-        use_clip: whether to apply gradient clipping
-        clip_norm: max norm for clip_by_norm
-        clip_value: max absolute value for clip_by_value
-        clip_type: 'norm' or 'value', type of clipping to apply
+    Returns both best V-measure and best Silhouette embeddings.
     """
+    os.makedirs(save_path, exist_ok=True)
     
     optimizer = tf.keras.optimizers.Adam(learning_rate=FLAGS.learning_rate)
+    
     best_v, best_sil = 0, -1
     best_epoch_v, best_epoch_s = 0, 0
     best_cluster_v, best_cluster_s = None, None
+    best_latent_v, best_latent_s = None, None
 
     def grad_step():
         with tf.GradientTape() as tape:
-            _ = model([features, graph_norm, graph], training=True)
+            _, latent, _ = model([features, graph_norm, graph], training=True)
             loss = sum(model.losses)
         grads = tape.gradient(loss, model.trainable_variables)
         
-        # Apply gradient clipping if requested
         if use_clip:
             if clip_type == "norm":
                 grads = [tf.clip_by_norm(g, clip_norm) if g is not None else None for g in grads]
@@ -127,38 +122,109 @@ def train(model, features, graph_norm, graph, true_labels=None,
         loss = grad_step()
         
         if epoch % 10 == 0:
-            pooled, _ = model([features, graph_norm, graph], training=False)
-            gmm = GaussianMixture(n_components=FLAGS.n_clusters).fit(pooled)
-            preds = gmm.predict(pooled)
+            # Evaluate latent embeddings
+            _, latent, _ = model([features, graph_norm, graph], training=False)
+            latent_np = latent.numpy()
+            
+            # Gaussian Mixture clustering
+            gmm = GaussianMixture(n_components=FLAGS.n_clusters, random_state=42).fit(latent_np)
+            preds = gmm.predict(latent_np)
             
             v = metrics.v_measure(true_labels, preds) if true_labels is not None else None
-            s = silhouette_score(pooled, preds)
+            s = silhouette_score(latent_np, preds)
             
             # Track best V-measure
             if v is not None and v > best_v:
                 best_v = v
                 best_epoch_v = epoch
                 best_cluster_v = preds
+                best_latent_v = latent_np.copy()
             
             # Track best Silhouette
             if s > best_sil:
                 best_sil = s
                 best_epoch_s = epoch
                 best_cluster_s = preds
+                best_latent_s = latent_np.copy()
             
             print(f"[{epoch}] Loss {loss:.4f} | V {v:.3f} | Sil {s:.3f}")
 
-    # Final metrics
-    print(f"V-measure at best silhouette (epoch {best_epoch_s}): {metrics.v_measure(true_labels, best_cluster_s)}")
-    print(f"Best V-measure (epoch {best_epoch_v}): {best_v}")
+    # Save latent embeddings
+    if best_latent_v is not None:
+        np.save(os.path.join(save_path, "latent_best_v.npy"), best_latent_v)
+    if best_latent_s is not None:
+        np.save(os.path.join(save_path, "latent_best_sil.npy"), best_latent_s)
+
+    # Optional UMAP plots
+    import datetime
+
+    if plot_umap:
+        reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        def plot_umap_labels(latent, preds, true_labels, title, filename):
+            umap_emb = reducer.fit_transform(latent)
+            plt.figure(figsize=(12,6))
+
+            # Subplot 1: Predicted labels
+            plt.subplot(1,2,1)
+            scatter = plt.scatter(umap_emb[:,0], umap_emb[:,1], c=preds, cmap="tab20", s=10)
+            plt.title(f"{title} - Predicted")
+            plt.xlabel("UMAP1"); plt.ylabel("UMAP2")
+            # Create legend as colored dots for each category
+            handles, _ = scatter.legend_elements(prop="colors")
+            plt.legend(handles, [str(i) for i in np.unique(preds)], title="Clusters", bbox_to_anchor=(1,1))
+
+            # Subplot 2: True labels
+            plt.subplot(1,2,2)
+            scatter2 = plt.scatter(umap_emb[:,0], umap_emb[:,1], c=true_labels, cmap="tab20", s=10)
+            plt.title(f"{title} - True")
+            plt.xlabel("UMAP1"); plt.ylabel("UMAP2")
+            handles2, _ = scatter2.legend_elements(prop="colors")
+            plt.legend(handles2, [str(i) for i in np.unique(true_labels)], title="Labels", bbox_to_anchor=(1,1))
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_path, f"{filename}_{timestamp}.png"), dpi=300)
+            plt.close()
+
+    # Best V-measure
+    if best_latent_v is not None:
+        plot_umap_labels(best_latent_v, best_cluster_v, true_labels, "Best V-measure", "umap_best_v")
+
+    # Best Silhouette
+    if best_latent_s is not None:
+        plot_umap_labels(best_latent_s, best_cluster_s, true_labels, "Best Silhouette", "umap_best_sil")
+
+
+    # Final metrics print
+    if true_labels is not None:
+        print(f"V-measure at best silhouette (epoch {best_epoch_s}): {metrics.v_measure(true_labels, best_cluster_s)}")
+        print(f"Best V-measure (epoch {best_epoch_v}): {best_v}")
+    print(f"Best Silhouette: {best_sil} at epoch {best_epoch_s}")
     
-    return best_v, best_sil, best_cluster_v, best_cluster_s
+    # Return same interface plus latents
+    return {
+        "best_v": best_v,
+        "best_sil": best_sil,
+        "best_epoch_v": best_epoch_v,
+        "best_epoch_s": best_epoch_s,
+        "best_cluster_v": best_cluster_v,
+        "best_cluster_s": best_cluster_s,
+        "best_latent_v": best_latent_v,
+        "best_latent_s": best_latent_s
+    }
+
 
 
 # ---------------- MAIN ----------------
 def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many arguments.")
+    
+    # --- Start memory tracking ---
+    import tracemalloc
+    tracemalloc.start()
+    baseline_current, baseline_peak = tracemalloc.get_traced_memory()
 
     # Load data
     CNA = load_adjacency_matrix(FLAGS.data_path)
@@ -186,8 +252,17 @@ def main(argv):
 
     # Train
     start = time.time()
-    best_v, best_sil, best_cluster_v, best_cluster_s = train(model, features, graph_norm, graph, true_labels)
+    result = train(model, features, graph_norm, graph, true_labels)
     print(f"Finished in {time.time()-start:.2f}s")
+
+    # --- End memory tracking ---
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    used_during = (peak - baseline_peak) / 1e6  # MB
+    print(f"🔹 Peak extra memory used during training: {used_during:.2f} MB")
+    print(f"🔹 Final memory after training: {current/1e6:.2f} MB")
+
 
 if __name__ == "__main__":
     app.run(main)
