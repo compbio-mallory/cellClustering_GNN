@@ -51,7 +51,8 @@ class GATCN_AE(models.Model):
 class GAT_AE(models.Model):
     def __init__(self, hidden_dims):
         super(GAT_AE, self).__init__()
-        [in_dim, num_hidden1, num_hidden2] = hidden_dims
+        # [in_dim, num_hidden1, num_hidden2] = hidden_dims
+        in_dim, num_hidden1, num_hidden2, architecture = hidden_dims
 
         # Encoder
         self.conv1 = GATConv(in_dim, num_hidden1, heads=1, activation='elu', skip_connection=False, _attention=True, _alpha=True)
@@ -62,7 +63,8 @@ class GAT_AE(models.Model):
         self.conv4 = GATConv(num_hidden1, in_dim, heads=1, activation=None, skip_connection=False, _attention=False, _alpha=True)
 
     def call(self, inputs):
-        features, adjacency = inputs
+        # features, adjacency = inputs
+        features, adjacency_normalized, adjacency = inputs
         h1 = self.conv1([features, adjacency])
         h2 = self.conv2([h1, adjacency])
 
@@ -73,7 +75,7 @@ class GAT_AE(models.Model):
         h3 = self.conv3([h2, adjacency], tied_attention=self.conv1.attentions)
         h4 = self.conv4([h3, adjacency])
 
-        return h2, h4  # latent + reconstruction
+        return h2, h2, h4  # latent + reconstruction
 
 
 # import tensorflow as tf
@@ -81,15 +83,22 @@ class GAT_AE(models.Model):
 # from gcn import GCN
 
 class GCN_AE(models.Model):
-    def __init__(self, architecture):
+    def __init__(self, hidden_dims):
         super(GCN_AE, self).__init__()
+        in_dim, num_hidden1, num_hidden2, architecture = hidden_dims
+        # architecture = hidden_dims[2:]
+        
         # Build encoder and decoder GCNs
-        self.encoder_layers = [GCN(n_channels=num_channels, skip_connection=True) for num_channels in architecture]
-        self.decoder_layers = [GCN(n_channels=architecture[-2], skip_connection=True),
-                               GCN(n_channels=architecture[0], skip_connection=True)]
+        # self.encoder_layers = [GCN(n_channels=num_channels, skip_connection=True) for num_channels in architecture]
+        # self.decoder_layers = [GCN(n_channels=architecture[-2], skip_connection=True),
+        #                        GCN(n_channels=architecture[0], skip_connection=True)]
 
+        self.encoder_layers = [GCN(n_channels=num_hidden1, skip_connection=True),
+                               GCN(n_channels=num_hidden2, skip_connection=True)]
+        # self.decoder_layers = [GCN(n_channels=num_hidden2, skip_connection=True),
+        #                        GCN(n_channels=in_dim, skip_connection=True)]
     def call(self, inputs):
-        features, adjacency_normalized = inputs
+        features, adjacency_normalized, adjacency = inputs
 
         # Encoder
         h = features
@@ -98,9 +107,9 @@ class GCN_AE(models.Model):
         latent = h
 
         # Decoder (reverse order)
-        h = latent
-        for gcn_layer in self.decoder_layers:
-            h = gcn_layer([h, adjacency_normalized])
+        # h = latent
+        # for gcn_layer in self.decoder_layers:
+        #     h = gcn_layer([h, adjacency_normalized])
         reconstruction = h
 
-        return latent, reconstruction
+        return latent, latent, reconstruction

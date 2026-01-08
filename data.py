@@ -58,3 +58,9 @@ def get_cna_cosine_similarity(fname):
   scaled_sim = (similarity_matrix - min_vals) / (max_vals - min_vals)
   dist = 1 - scaled_sim
   return dist
+
+def get_read_count(fname):
+  reads = pd.read_csv(fname, sep = "\t")
+  reads = reads.drop(['CHROM', 'START', "END"], axis = 1)
+  reads = reads.to_numpy()
+  return reads.T

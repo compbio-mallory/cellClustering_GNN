@@ -110,8 +110,8 @@ class DMoN(tf.keras.layers.Layer):
     self.add_loss(self.collapse_regularization * collapse_loss)
 
     # Calculate MSE loss between the features and reconstructions
-    mse_loss = tf.reduce_mean(tf.square(input_features - recon))
-    self.add_loss(mse_loss)
+    # mse_loss = tf.reduce_mean(tf.square(input_features - recon))
+    # self.add_loss(mse_loss)
     # Calculate binary cross entropy loss between the features and reconstructions
     # bce_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(input_features, recon))
     # self.add_loss(bce_loss)

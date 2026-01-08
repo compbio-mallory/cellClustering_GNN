@@ -25,7 +25,7 @@ tf.random.set_seed(seed)
 np.random.seed(seed)
 
 from data import load_tsv, load_adjacency_matrix
-from GATCN_AE import GATCN_AE
+from GATCN_AE import GATCN_AE, GAT_AE, GCN_AE
 import pandas as pd
 
 FLAGS = flags.FLAGS
@@ -38,10 +38,9 @@ flags.DEFINE_string(
     'SNV_path',
     None,
     'Input SNV data path.')
-flags.DEFINE_list(
-    'architecture',
-    [16],
-    'Network architecture in the format `a,b,c,d`.')
+flags.DEFINE_list("architecture", ["99","99","16"], 
+                  "Comma-separated list of hidden layer sizes, e.g. '64,32,16'. "
+                  "All hidden layers including intermediate ones can be tuned.")
 flags.DEFINE_float(
     'collapse_regularization',
     1,
@@ -49,7 +48,7 @@ flags.DEFINE_float(
     lower_bound=0)
 flags.DEFINE_float(
     'dropout_rate',
-    0,
+    0.5,
     'Dropout rate for GNN representations.',
     lower_bound=0,
     upper_bound=1)
@@ -75,293 +74,231 @@ flags.DEFINE_string(
     'data_path',
     None,
     'Path to the data folder.')
+flags.DEFINE_enum("model_type", "gatcn", ["gat", "gcn", "gatcn"],
+                  "Which autoencoder to use: GAT, GCN, or Hybrid (GAT+GCN).")
+flags.DEFINE_enum(
+    "feature_type", 
+    "euclidean", 
+    ["dot", "cosine", "euclidean", "pearson"],
+    "Similarity used to compute the (N×N) feature matrix from SNV.")
 
-def adj_thresholed(adj, threshold):
-  # make the values of adj (n, n) 0 if they are below threshold
-  adj[adj < threshold] = 0
-  adj[adj >= threshold] = 1
-  return adj
 
 def convert_scipy_sparse_to_sparse_tensor(
     matrix):
-  """Converts a sparse matrix and converts it to Tensorflow SparseTensor.
+    """Converts a sparse matrix and converts it to Tensorflow SparseTensor.
 
-  Args:
-    matrix: A scipy sparse matrix.
+    Args:
+        matrix: A scipy sparse matrix.
 
-  Returns:
-    A ternsorflow sparse matrix (rank-2 tensor).
-  """
-  matrix = matrix.tocoo()
-  return tf.sparse.SparseTensor(
-      np.vstack([matrix.row, matrix.col]).T, matrix.data.astype(np.float32),
-      matrix.shape)
+    Returns:
+        A ternsorflow sparse matrix (rank-2 tensor).
+    """
+    matrix = matrix.tocoo()
+    return tf.sparse.SparseTensor(
+        np.vstack([matrix.row, matrix.col]).T, matrix.data.astype(np.float32),
+        matrix.shape)
 
-def get_affinity(data, num_cluster = 4, ):
-  from sklearn.neighbors import kneighbors_graph
-  data = data.todense()
-  # convert data to numpy array
-  data = np.array(data)
-  A = kneighbors_graph(data, num_cluster, mode='connectivity', include_self=False)
-  A.toarray()
+def feature_extractor(SNV: np.ndarray, feature_type: str) -> np.ndarray:
+    """
+    Compute feature matrix from SNV data.
+    Options: dot product, cosine similarity, euclidean distance, pearson correlation.
+    """
+    if feature_type == "dot":
+        features = np.dot(SNV, SNV.T)
+    elif feature_type == "cosine":
+        norms = np.linalg.norm(SNV, axis=1, keepdims=True)
+        features = np.dot(SNV, SNV.T) / (norms @ norms.T + 1e-8)
+    elif feature_type == "euclidean":
+        sq_sum = np.sum(SNV**2, axis=1, keepdims=True)
+        features = np.sqrt(sq_sum + sq_sum.T - 2 * np.dot(SNV, SNV.T))
+    elif feature_type == "pearson":
+        SNV_centered = SNV - SNV.mean(axis=1, keepdims=True)
+        norms = np.linalg.norm(SNV_centered, axis=1, keepdims=True)
+        features = np.dot(SNV_centered, SNV_centered.T) / (norms @ norms.T + 1e-10)
+    else:
+        raise ValueError(f"Unknown feature_type {feature_type}")
+    return features
 
-  return A
+def build_autoencoder(model_type: str, in_dim: int, architecture):
+    """
+    Return an AE model (GAT, GCN, or hybrid).
+    `in_dim` is determined by data.
+    `architecture` is a list of hidden layer sizes starting from layer 2.
+    """
+    # Full architecture: prepend input dimension
+    hidden_dims = [in_dim] + [int(x) for x in architecture]
 
-def get_matching(data):
-  # check if the data is numpy array
-  if not isinstance(data, np.ndarray):
-    data = data.todense()
+    if model_type == "gat":
+        return GAT_AE(hidden_dims)
+    elif model_type == "gcn":
+        return GCN_AE(hidden_dims)
+    elif model_type == "gatcn":
+        return GATCN_AE(hidden_dims)
+    else:
+        raise ValueError(f"Unknown model_type {model_type}")
 
-  # Ensure the data is binary (convert anything that's not 1 into 0)
-  data = np.where(data == 1, 1, 0)
+def build_dmon(input_features, input_graph, input_adj, model_type, feature_size, n_nodes):
+    """
+    Combine AE with DMoN pooling.
+    feature_size = data-determined input dimension.
+    architecture = tunable hidden layers starting from layer 2.
+    """
+    arch = [int(x) for x in FLAGS.architecture]  # tunable hidden layers
+    autoencoder = build_autoencoder(model_type, feature_size, arch)
 
-  # Compute the pairwise count of matching ones between SNVs using matrix multiplication (dot product)
-  matching_matrix = np.dot(data, data.T)
-  
-  # get the maximum values for each row
-  max_values = matching_matrix.max(axis=1)
+    with tf.device('/cpu:0'):
+        output, emb, output_ae = autoencoder([input_features, input_graph, input_adj])
+        pool, pool_assignment = dmon.DMoN(
+            FLAGS.n_clusters,
+            collapse_regularization=FLAGS.collapse_regularization,
+            dropout_rate=FLAGS.dropout_rate
+        )([output, input_adj, input_features, output_ae])
 
-  # fill the diagonal with the max values
-  np.fill_diagonal(matching_matrix, max_values)
+    return tf.keras.Model(inputs=[input_features, input_graph, input_adj],
+                          outputs=[pool, pool_assignment])
 
-  # normalize the matching matrix row-wise
-  matching_matrix_norm = matching_matrix / np.linalg.norm(matching_matrix, axis=1, keepdims=True)
-
-  # make the nan values 0
-  matching_matrix_norm = np.nan_to_num(matching_matrix_norm)
-
-  return matching_matrix_norm, matching_matrix
-
-def impute_data(data):
-    # Replace '3' with np.nan
-    data = np.where(data == 3, np.nan, data)
-
-    # Initialize the KNN imputer
-    imputer = KNNImputer(n_neighbors=10)  # You can adjust the number of neighbors
-
-    # Fit and transform the data
-    imputed_data = imputer.fit_transform(data)
-    
-    return imputed_data
-
-def build_dmon(input_features,
-               input_graph,
-               input_adjacency):
-  
-  output = input_features
-  # GATCN_AE function call 
-
-  hidden_dims = [output.shape[1], 99, 99, FLAGS.architecture]
-  with tf.device('/cpu:0'):
-  # Build and train your model here
-    output, emb, output_ae = GATCN_AE(hidden_dims)([output, input_graph, input_adjacency])
-    pool, pool_assignment = dmon.DMoN(
-        FLAGS.n_clusters,
-        collapse_regularization=FLAGS.collapse_regularization,
-        dropout_rate=FLAGS.dropout_rate)([output, input_adjacency, input_features, output_ae])
-  return tf.keras.Model(
-      inputs=[input_features, input_graph, input_adjacency],
-      outputs=[pool, pool_assignment])
 
 
 def main(argv):
-  if len(argv) > 1:
-    raise app.UsageError('Too many command-line arguments.')
-  # Load and process the data (convert node features to dense, normalize the
-  # graph, convert it to Tensorflow sparse tensor.
-  if FLAGS.data_path is not None:
-    FLAGS.CNA_path = os.path.join(FLAGS.data_path, 'cell_adj_cosine.tsv')
-    FLAGS.SNV_path = os.path.join(FLAGS.data_path, 'input_genotype.tsv')
-    FLAGS.labels_path = os.path.join(FLAGS.data_path, 'cells_groups.tsv')
+    if len(argv) > 1:
+        raise app.UsageError('Too many command-line arguments.')
+    # Load and process the data (convert node features to dense, normalize the
+    # graph, convert it to Tensorflow sparse tensor.
+    if FLAGS.data_path is not None:
+        FLAGS.CNA_path = os.path.join(FLAGS.data_path, 'cell_adj_cosine.tsv')
+        FLAGS.SNV_path = os.path.join(FLAGS.data_path, 'input_genotype.tsv')
+        FLAGS.labels_path = os.path.join(FLAGS.data_path, 'cells_groups.tsv')
+
+    if FLAGS.labels_path is not None:
+        true_labels, _ = metrics.truth_values(FLAGS.labels_path)
+
+    start = time.time()
+    # Load CNA cosine similarity matrix as feature matrix
+    CNA_cosine_sparse = load_adjacency_matrix(FLAGS.CNA_path)
+    CNA_cosine_dense = CNA_cosine_sparse.todense()
+    CNA_cosine = tf.convert_to_tensor(CNA_cosine_dense, dtype=tf.float32)
+
+    SNV_data = np.loadtxt(FLAGS.SNV_path, delimiter="\t")
+    if SNV_data.shape[0] != CNA_cosine.shape[0]:
+        SNV_data = SNV_data.T
+
+    # Replace "3" with "0"
+    SNV_data[SNV_data == 3] = 0
+
+    # use feature_extractor to compute feature matrix from SNV data
+    SNV_adj = feature_extractor(SNV_data, FLAGS.feature_type)
     
-  if FLAGS.labels_path is not None:
-    true_labels, _ = metrics.truth_values(FLAGS.labels_path)
+    # SNV_adj = cosine_similarity(SNV_data)
 
-  start = time.time()
-  # Load CNA cosine similarity matrix as feature matrix
-  CNA_cosine_sparse = load_adjacency_matrix(FLAGS.CNA_path)
-  CNA_cosine_dense = CNA_cosine_sparse.todense()
-  CNA_cosine = tf.convert_to_tensor(CNA_cosine_dense, dtype=tf.float32)
-  # adjacency = utils.construct_knn_graph(CNA_cosine_sparse, k=7)
-  
-  # Load SNV data
-  # SNV_data = load_tsv(FLAGS.SNV_path)
-  SNV_data = np.loadtxt(FLAGS.SNV_path, delimiter="\t")
-  if SNV_data.shape[0] != CNA_cosine.shape[0]:
-    SNV_data = SNV_data.T
-    
-  # Impute the SNV data
-  """for snv dotproduct test setting only"""
-  # SNV_data = impute_data(SNV_data)
+    SNV_adj = sparse.csr_matrix(SNV_adj)
 
-  # SNV_adj = cosine_similarity(SNV_data)
+    n_nodes = CNA_cosine.shape[0]
+    feature_size = CNA_cosine.shape[1]
 
-  # Replace "3" with "0"
-  SNV_data[SNV_data == 3] = 0
+    # adjacency = CNA_cosine_sparse
+    # features = tf.convert_to_tensor(SNV_adj_dense, dtype=tf.float32)
 
-  # Calculate dot product
-  SNV_adj = np.dot(SNV_data, SNV_data.T)
-  """for snv dotproduct test setting only"""
+    adjacency = SNV_adj
+    features = CNA_cosine
 
-  SNV_adj = cosine_similarity(SNV_data)
-  
-  SNV_adj_dense = SNV_adj
-  
-  # SNV_data, matching_matrix = get_matching(SNV_data)
-  # matching_matrix = sparse.csr_matrix(matching_matrix)
-  
-  # SNV_adj = utils.construct_knn_graph(features, k=7)
-  SNV_adj = sparse.csr_matrix(SNV_adj)
+    # Create graph from SNV_adj
+    graph = convert_scipy_sparse_to_sparse_tensor(adjacency)
+    graph_normalized = convert_scipy_sparse_to_sparse_tensor(
+        utils.normalize_graph(adjacency.copy()))
 
-  n_nodes = CNA_cosine.shape[0]
-  feature_size = CNA_cosine.shape[1]
-  
-  # adjacency = CNA_cosine_sparse
-  # features = tf.convert_to_tensor(SNV_adj_dense, dtype=tf.float32)
-  
-  adjacency = SNV_adj
-  features = CNA_cosine
+    # Create model input placeholders of appropriate size
+    input_features = tf.keras.layers.Input(shape=(feature_size,))
+    input_graph = tf.keras.layers.Input((n_nodes,), sparse=True)
+    input_adjacency = tf.keras.layers.Input((n_nodes,), sparse=True)
 
-  # Create graph from SNV_adj
-  graph = convert_scipy_sparse_to_sparse_tensor(adjacency)
-  graph_normalized = convert_scipy_sparse_to_sparse_tensor(
-      utils.normalize_graph(adjacency.copy()))
+    # model = build_dmon(input_features, input_graph, input_adjacency)
+    model = build_dmon(input_features, input_graph, input_adjacency,
+                       FLAGS.model_type, feature_size, n_nodes)
 
-  # Create model input placeholders of appropriate size
-  input_features = tf.keras.layers.Input(shape=(feature_size,))
-  input_graph = tf.keras.layers.Input((n_nodes,), sparse=True)
-  input_adjacency = tf.keras.layers.Input((n_nodes,), sparse=True)
+    # Computes the gradients wrt. the sum of losses, returns a list of them.
+    def grad(model, inputs):
+        with tf.GradientTape() as tape:
+            _ = model(inputs, training=True)
+            loss_value = sum(model.losses)
+            grads = tape.gradient(loss_value, model.trainable_variables)
+            # Apply gradient clipping
+            clipnorm = 5.0
+            clipvalue = 0.5
+            # Uncomment one of the following lines depending on whether you want to clip by norm or by value
+            grads = [tf.clip_by_norm(g, clipnorm) if g is not None else None for g in grads]
+            grads = [tf.clip_by_value(g, -clipvalue, clipvalue) if g is not None else None for g in grads]
 
-  model = build_dmon(input_features, input_graph, input_adjacency)
-  
-  # Computes the gradients wrt. the sum of losses, returns a list of them.
-  def grad(model, inputs):
-    with tf.GradientTape() as tape:
-      _ = model(inputs, training=True)
-      loss_value = sum(model.losses)
-      grads = tape.gradient(loss_value, model.trainable_variables)
-      # Apply gradient clipping
-      clipnorm = 5.0
-      clipvalue = 0.5
-      # Uncomment one of the following lines depending on whether you want to clip by norm or by value
-      grads = [tf.clip_by_norm(g, clipnorm) if g is not None else None for g in grads]
-      grads = [tf.clip_by_value(g, -clipvalue, clipvalue) if g is not None else None for g in grads]
-    
-    return model.losses, grads
+        return model.losses, grads
 
-  for lr in FLAGS.learning_rates:
-      # optimizer = tf.keras.optimizers.AdamW(learning_rate=lr, weight_decay=0.000001, clipnorm=5.0, clipvalue=0.5, amsgrad=True, beta_1=0.9, beta_2=0.999, epsilon=1e-07, name='AdamW')
-      # optimizer = tf.keras.optimizers.Adam(lr)
-      optimizer = tf.keras.optimizers.AdamW(
-          learning_rate=lr,
-          weight_decay=1e-6,
-          beta_1=0.9,
-          beta_2=0.999,
-          epsilon=1e-7,
-          amsgrad=True,
-          name='AdamW'
-      )
+    for lr in FLAGS.learning_rates:
+        # optimizer = tf.keras.optimizers.AdamW(learning_rate=lr, weight_decay=0.000001, clipnorm=5.0, clipvalue=0.5, amsgrad=True, beta_1=0.9, beta_2=0.999, epsilon=1e-07, name='AdamW')
+        optimizer = tf.keras.optimizers.Adam(lr)
+        # optimizer = tf.keras.optimizers.AdamW(
+        #     learning_rate=lr,
+        #     weight_decay=1e-6,
+        #     beta_1=0.9,
+        #     beta_2=0.999,
+        #     epsilon=1e-7,
+        #     amsgrad=True,
+        #     name='AdamW'
+        # )
 
-      best_v_measure = 0
-      best_cluster_v_measure = None
-      best_epoch_v_measure = 0
-      best_silhouette = -1
-      best_epoch_silhouette = 0
-      best_cluster_silhouette = None
-      
-      # save the v_measure and silhouette scores for each epoch
-      v_measure_scores = []
-      silhouette_scores = []
-      modularity_scores = []
-      losses = []
-  
-      model.compile(optimizer, None)
-      for epoch in range(FLAGS.n_epochs):
-          loss_values, grads = grad(model, [features, graph_normalized, graph])
-          optimizer.apply_gradients(zip(grads, model.trainable_variables)) # back propagation
-          if epoch % 10 == 0:
-            features_pooled, assignments = model([features, graph_normalized, graph], training=False)
-            # perform the gmm clustering on the pooled features
+        best_v_measure = 0
+        best_cluster_v_measure = None
+        best_epoch_v_measure = 0
+        best_silhouette = -1
+        best_epoch_silhouette = 0
+        best_cluster_silhouette = None
 
-            gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features_pooled)
-            assignments = gmm.predict(features_pooled)
-            
-            if FLAGS.labels_path is not None:
-              v_measure = metrics.v_measure(true_labels, assignments)
-              v_measure_scores.append(v_measure)
-              if v_measure > best_v_measure:
-                best_v_measure = v_measure
-                best_cluster_v_measure = assignments
-                best_epoch_v_measure = epoch
-            
-            silhouette_feat_pooled = silhouette_score(features_pooled, assignments)
-            # convert feature to numpy array
-            feat = features.numpy()
-            silhouette_feat = silhouette_score(feat, assignments)
-            silhouette_avg = (0.1*silhouette_feat_pooled + 0.1*silhouette_feat)
-            
-            silhouette_scores.append(silhouette_avg)
-            if silhouette_avg > best_silhouette:
-                best_silhouette = silhouette_avg
-                best_epoch_silhouette = epoch
-                best_cluster_silhouette = assignments
-            loss = sum(loss_values)
-            losses.append(-loss)
-            
-            # calculate modularity
-            modularity = metrics.modularity(SNV_adj.todense(), assignments)
-            modularity_scores.append(modularity)
-            
-          # if epoch % 100 == 0:
-          #   print(f'epoch {epoch}, losses: ' +
-          #         ' '.join([f'{loss_value.numpy():.4f}' for loss_value in loss_values]))
-          #   # Obtain the cluster assignments.
-          #   features_pooled, assignments = model([CNA_cosine, graph_normalized, graph], training=False)
-          #   # perform the gmm clustering on the pooled features
-          #   gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features_pooled)
-          #   assignments = gmm.predict(features_pooled)
-          #   print("clusters: ", assignments)
-          #   if FLAGS.labels_path is not None:
-          #     print("v_measure: ", metrics.v_measure(true_labels, assignments))
+        # save the v_measure and silhouette scores for each epoch
+        v_measure_scores = []
+        silhouette_scores = []
+        modularity_scores = []
+        losses = []
 
-  print("v_measure\t", metrics.v_measure(true_labels, best_cluster_silhouette),"\t",best_v_measure)
-  
-          
-  # Obtain the cluster assignments.
-  features, assignments = model([CNA_cosine, graph_normalized, graph], training=False)
-  assignments = assignments.numpy()
-  clusters = assignments.argmax(axis=1)  # Convert soft to hard clusters.
-  clusters_str = ', '.join(map(str, clusters))  # Convert elements to string and join with comma.
-#   print("clusters: ", clusters_str)
-#   # Prints some metrics used in the paper.
-#   print('Conductance:', metrics.conductance(CNA_cosine, clusters))
-#   print('Modularity:', metrics.modularity(CNA_cosine, clusters))
+        model.compile(optimizer, None)
+        for epoch in range(FLAGS.n_epochs):
+            loss_values, grads = grad(model, [features, graph_normalized, graph])
+            optimizer.apply_gradients(zip(grads, model.trainable_variables)) # back propagation
+            if epoch % 10 == 0:
+                features_pooled, assignments = model([features, graph_normalized, graph], training=False)
+                # perform the gmm clustering on the pooled features
 
-#   # Print number of nodes in each cluster
-#   for i in range(FLAGS.n_clusters):
-#     print(f'Cluster {i}: {np.sum(clusters == i)} nodes')
+                gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features_pooled)
+                assignments = gmm.predict(features_pooled)
 
-  predicted_clusters = np.array(clusters)
+                if FLAGS.labels_path is not None:
+                    v_measure = metrics.v_measure(true_labels, assignments)
+                    v_measure_scores.append(v_measure)
+                    if v_measure > best_v_measure:
+                        best_v_measure = v_measure
+                        best_cluster_v_measure = assignments
+                        best_epoch_v_measure = epoch
 
+                silhouette_feat_pooled = silhouette_score(features_pooled, assignments)
+                # convert feature to numpy array
+                feat = features.numpy()
+                silhouette_feat = silhouette_score(feat, assignments)
+                # silhouette_avg = (0.1*silhouette_feat_pooled + 0.1*silhouette_feat)
+                silhouette_avg = silhouette_feat_pooled
 
-  
-  # print(f"V-measure: ", metrics.v_measure(true_labels, predicted_clusters))
-  # perform the gmm clustering on the features
-  gmm = GaussianMixture(n_components=FLAGS.n_clusters, covariance_type='full').fit(features)
-  assignments = gmm.predict(features)
-  # print("clusters: ", assignments)
-  predicted_clusters = assignments
-  # Calculate V-measure for the new predicted clusters
-#   if FLAGS.labels_path is not None:
-#     print(f"V-measure for gmm clustering: ", metrics.v_measure(true_labels, predicted_clusters))
-  end = time.time()
-  
-  print(f"Time taken: {end - start} seconds")
-  # print missclassified nodes
-  # pred_unique_labels = pd.factorize(predicted_clusters)[0]
-  # print("unique labels: ", pred_unique_labels)
-  # missclassified = np.where(true_labels != pred_unique_labels)
-  # print("Missclassified nodes: ", missclassified)
+                silhouette_scores.append(silhouette_avg)
+                if silhouette_avg > best_silhouette:
+                    best_silhouette = silhouette_avg
+                    best_epoch_silhouette = epoch
+                    best_cluster_silhouette = assignments
+                loss = sum(loss_values)
+                losses.append(-loss)
 
+                # calculate modularity
+                modularity = metrics.modularity(SNV_adj.todense(), assignments)
+                modularity_scores.append(modularity)
+
+    ARI = metrics.ARI(true_labels, best_cluster_v_measure) if true_labels is not None else None
+    NMI = metrics.NMI(true_labels, best_cluster_v_measure) if true_labels is not None else None
+    v_measure_gt = metrics.v_measure(true_labels, best_cluster_v_measure) if true_labels is not None else None
+    v_measure_silhouette = metrics.v_measure(true_labels, best_cluster_silhouette) if true_labels is not None else None
+    print(f"Final Results | V-measure-silhouette: {v_measure_silhouette:.4f} | V-measure GT: {v_measure_gt:.4f} | ARI: {ARI:.4f} | NMI: {NMI:.4f} | Best Silhouette: {best_silhouette:.4f} | Time: {time.time()-start:.2f}s")
+    print("Best cluster silhouette:", best_cluster_silhouette, " best cluster v_measure:", best_cluster_v_measure)
 if __name__ == '__main__':
-  app.run(main)
+    app.run(main)   
