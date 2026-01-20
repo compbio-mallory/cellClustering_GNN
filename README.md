@@ -1,12 +1,19 @@
 # SCGclust: Single Cell Graph clustering
 
 ## Introduction
-This project implements a graph clustering algorithm using a Graph Attention Convolutional Network Autoencoder (GATCN_AE) and Deep Modularity Networks (DMoN). It is particularly suited for clustering cells based on genetic data, such as Copy Number Alterations (CNA) and Single Nucleotide Variants (SNV).
+This project implements a graph clustering algorithm for single-cell genomic data using a Graph Attention Convolutional Network Autoencoder (GATCN_AE) combined with Deep Modularity Networks (DMoN). It is particularly suited for clustering cells based on genetic data, such as Copy Number Alterations (CNA) and Single Nucleotide Variants (SNV).
 
-The main components are:
+### Workflow
+1. **Feature Extraction**: The model computes a feature matrix from SNV data using one of four similarity metrics (dot product, cosine similarity, Euclidean distance, or Pearson correlation).
+2. **Graph Construction**: The SNV-derived similarity matrix serves as the graph adjacency matrix, while the CNA cosine similarity matrix provides node features.
+3. **Autoencoder**: The model uses a configurable autoencoder (GAT, GCN, or hybrid GATCN) to learn node embeddings that capture the structure of the graph.
+4. **Clustering**: DMoN pooling layer performs graph-based clustering by optimizing modularity and other clustering objectives.
+5. **Post-processing**: Gaussian Mixture Model (GMM) clustering is applied to the pooled features for final cluster assignments.
+6. **Evaluation**: The results are evaluated using metrics including V-measure, Silhouette score, Adjusted Rand Index (ARI), Normalized Mutual Information (NMI), and modularity.
 
-1.	GATCN_AE: A graph autoencoder that learns node embeddings using Graph Attention Convolutional Networks.
-2.	DMoN: A clustering layer that groups nodes into clusters by optimizing modularity and other clustering objectives.
+### Main Components
+1. **GATCN_AE**: A graph autoencoder that learns node embeddings using Graph Attention Convolutional Networks (supports GAT, GCN, or hybrid modes).
+2. **DMoN**: A clustering layer that groups nodes into clusters by optimizing modularity and other clustering objectives.
 
 ## Installation
 
@@ -34,47 +41,76 @@ $ pip install -r requirements.txt
 ```
 ## Usage
 
---CNA_path: Path to the CNA cosine similarity data file.
+### Command Line Arguments
 
---SNV_path: Path to the SNV data file.
-
---labels_path: Path to the true labels file.
-
---data_path: Path to the data directory containing the above files. If provided,individual paths can be omitted.
-
---architecture: Comma-separated list defining the network architecture (e.g., 16,3264).
-
---n_clusters: Number of clusters to identify.
-
---n_epochs: Number of training epochs.
-
---learning_rates: Comma-separated list of learning rates to try.
-
---dropout_rate: Dropout rate for the network (between 0 and 1).
-
---collapse_regularization: Regularization parameter for the clustering layer.
+- `--CNA_path`: Path to the CNA cosine similarity data file.
+- `--SNV_path`: Path to the SNV data file.
+- `--labels_path`: Path to the true labels file (default: `data/cell_idx.tsv`).
+- `--data_path`: Path to the data directory containing CNA, SNV, and labels files. If provided, individual paths can be omitted.
+- `--architecture`: Comma-separated list defining the network architecture hidden layer sizes (default: `99,99,16`).
+- `--n_clusters`: Number of clusters to identify (default: 4).
+- `--n_epochs`: Number of training epochs (default: 1000).
+- `--learning_rates`: Comma-separated list of learning rates to try (default: `0.001`).
+- `--dropout_rate`: Dropout rate for the network (default: 0.5, range: 0-1).
+- `--collapse_regularization`: Regularization parameter for the clustering layer (default: 1).
+- `--model_type`: Type of autoencoder to use: `gat`, `gcn`, or `gatcn` (default: `gatcn`).
+- `--feature_type`: Similarity metric for computing feature matrix from SNV data: `dot`, `cosine`, `euclidean`, or `pearson` (default: `euclidean`).
 
 ### Example Command
 ```sh
 $ python train.py \
   --CNA_path data/CNA_cosine.tsv \
-  --SNV_path data/SNVs.tsv
-  --architecture 16 \
+  --SNV_path data/SNVs.tsv \
+  --architecture 99,99,16 \
   --n_clusters 4 \
   --n_epochs 1000 \
   --learning_rates 0.001 \
   --dropout_rate 0.5 \
-  --collapse_regularization 1
+  --collapse_regularization 1 \
+  --model_type gatcn \
+  --feature_type euclidean
 ```
-## Data Preperation 
+
+### Alternative: Using Data Path
+```sh
+$ python train.py \
+  --data_path data/ \
+  --architecture 99,99,16 \
+  --n_clusters 4 \
+  --n_epochs 1000 \
+  --model_type gatcn \
+  --feature_type euclidean
+```
+## Data Preparation
 
 Your data should be organized as follows:
 
-1. Data Directory (data/ by default):
-2. CNA Cosine Similarity Matrix (cell_adj_cosine.tsv): A TSV file representing the cosine similarity between cells based on CNA data.
-3. Use get_cna_cosine_similarity() function from data.py to get the CNA cosine similarity matrix(please modify the function to remove unwanted coulumns from the data)
-4. SNV Data (input_genotype.tsv): A TSV file containing SNV data for each cell.
-5. Labels (cells_groups.tsv): A TSV file with true cluster labels for evaluation.
+1. **Data Directory** (default: `data/`)
+2. **CNA Cosine Similarity Matrix** (`CNA_cosine.tsv`): A TSV file representing the cosine similarity between cells based on CNA data. Use the `get_cna_cosine_similarity()` function from `data.py` to generate this (modify the function as needed to exclude unwanted columns).
+3. **SNV Data** (`SNVs.tsv`): A TSV file containing SNV (Single Nucleotide Variant) genotype data for each cell. Values of "3" are replaced with "0" during processing.
+4. **Labels** (`cell_idx.tsv`): A TSV file with true cluster labels for evaluation (optional, used for computing metrics like v-measure, ARI, and NMI).
+
+### Expected File Structure
+```
+data/
+├── CNA_cosine.tsv       # Cosine similarity matrix (N × N)
+├── SNVs.tsv             # SNV genotype data (N × M)
+└── cell_idx.tsv         # True cluster labels (optional)
+```
+
+Where N = number of cells and M = number of SNV features.
+
+## Output and Evaluation Metrics
+
+The training process evaluates clustering performance using the following metrics:
+
+- **V-measure**: Measures the homogeneity and completeness of the clustering.
+- **Silhouette Score**: Measures how similar a cell is to its own cluster compared to other clusters.
+- **Adjusted Rand Index (ARI)**: Measures the similarity between predicted and true cluster assignments (adjusted for chance).
+- **Normalized Mutual Information (NMI)**: Measures the mutual dependence between predicted and true clusters.
+- **Modularity**: Measures the strength of the graph clustering structure.
+
+The best clustering is selected based on V-measure score during training.
 
 ## Data Simulation
 
